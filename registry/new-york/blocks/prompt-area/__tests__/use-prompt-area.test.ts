@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { usePromptArea } from '../use-prompt-area'
-import type { Segment, TriggerConfig, ChipSegment } from '../types'
+import type { Segment, TriggerConfig } from '../types'
 
 // ---------------------------------------------------------------------------
 // jsdom polyfill: Range.getBoundingClientRect is not implemented
@@ -1135,6 +1135,96 @@ describe('usePromptArea', () => {
       // End composition
       act(() => {
         result.current.eventHandlers.onCompositionEnd()
+      })
+
+      document.body.removeChild(editor)
+    })
+
+    it('treats native composing input as IME even before compositionstart fires', () => {
+      const onChange = vi.fn()
+      const { result } = renderHook(() =>
+        usePromptArea(defaultProps({ onChange, triggers: [mentionTrigger] })),
+      )
+
+      const editor = attachEditor(result.current)
+      populateEditor(editor, '@n')
+      placeCursor(editor.firstChild!, 2)
+
+      act(() => {
+        result.current.handleInput({
+          nativeEvent: { isComposing: true },
+        } as unknown as React.FormEvent<HTMLDivElement>)
+      })
+
+      expect(onChange).toHaveBeenCalledWith([{ type: 'text', text: '@n' }])
+      expect(mentionTrigger.onSearch).not.toHaveBeenCalled()
+
+      document.body.removeChild(editor)
+    })
+
+    it('syncs final compositionend text without requiring a trailing input event', async () => {
+      const onChange = vi.fn()
+      const { result } = renderHook(() => usePromptArea(defaultProps({ onChange })))
+
+      const editor = attachEditor(result.current)
+
+      populateEditor(editor, 'n')
+      placeCursor(editor.firstChild!, 1)
+      act(() => {
+        result.current.handleInput({
+          nativeEvent: { isComposing: true },
+        } as unknown as React.FormEvent<HTMLDivElement>)
+      })
+
+      act(() => {
+        result.current.eventHandlers.onCompositionStart()
+      })
+      populateEditor(editor, '你')
+      placeCursor(editor.firstChild!, 1)
+
+      await act(async () => {
+        result.current.eventHandlers.onCompositionEnd()
+        await Promise.resolve()
+      })
+
+      expect(onChange).toHaveBeenLastCalledWith([{ type: 'text', text: '你' }])
+
+      document.body.removeChild(editor)
+    })
+
+    it('keeps a trailing input after compositionend in the IME branch until the microtask completes', async () => {
+      const onChange = vi.fn()
+      const onSearch = mentionTrigger.onSearch
+      if (!onSearch) {
+        throw new Error('mentionTrigger.onSearch is required for this test')
+      }
+      const onSearchMock = vi.mocked(onSearch)
+      const { result } = renderHook(() =>
+        usePromptArea(defaultProps({ onChange, triggers: [mentionTrigger] })),
+      )
+
+      const editor = attachEditor(result.current)
+
+      act(() => {
+        result.current.eventHandlers.onCompositionStart()
+      })
+      populateEditor(editor, '@你')
+      placeCursor(editor.firstChild!, 2)
+
+      result.current.eventHandlers.onCompositionEnd()
+      onSearchMock.mockClear()
+
+      act(() => {
+        result.current.handleInput({
+          nativeEvent: { isComposing: false },
+        } as unknown as React.FormEvent<HTMLDivElement>)
+      })
+
+      expect(onChange).toHaveBeenLastCalledWith([{ type: 'text', text: '@你' }])
+      expect(onSearchMock).not.toHaveBeenCalled()
+
+      await act(async () => {
+        await Promise.resolve()
       })
 
       document.body.removeChild(editor)
@@ -2667,7 +2757,7 @@ describe('usePromptArea', () => {
       populateEditor(editor, 'hello world')
       placeCursor(editor.firstChild!, 3) // collapsed cursor at offset 3
 
-      const { e, preventDefault } = ctrlKeyEvent('b')
+      const { e } = ctrlKeyEvent('b')
       act(() => {
         result.current.handleKeyDown(e)
       })

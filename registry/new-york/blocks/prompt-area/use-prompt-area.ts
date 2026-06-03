@@ -87,7 +87,7 @@ type UsePromptAreaReturn = {
   suggestionsLoading: boolean
   suggestionsError: string | null
   selectedSuggestionIndex: number
-  handleInput: () => void
+  handleInput: (e?: React.FormEvent<HTMLDivElement>) => void
   handleKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
   handleClick: (e: React.MouseEvent<HTMLDivElement>) => void
   selectSuggestion: (suggestion: TriggerSuggestion) => void
@@ -377,10 +377,19 @@ export function usePromptArea({
   // Wire up edge-case event handlers
   // -----------------------------------------------------------------------
 
+  const syncCompositionEndSegments = useCallback(
+    (segments: Segment[]) => {
+      lastRenderedValue.current = segments
+      onChange(segments)
+    },
+    [onChange],
+  )
+
   const events = usePromptAreaEvents({
     editorRef,
     readSegmentsFromDOM,
     onChange,
+    syncCompositionEndSegments,
     renderSegmentsToDOM,
     runTriggerDetection,
     dismissTrigger,
@@ -439,78 +448,86 @@ export function usePromptArea({
   // Handle input events
   // -----------------------------------------------------------------------
 
-  const handleInput = useCallback(() => {
-    if (isSyncing.current) return
+  const handleInput = useCallback(
+    (e?: React.FormEvent<HTMLDivElement>) => {
+      if (isSyncing.current) return
 
-    // During IME composition, sync model but skip trigger detection
-    if (events.isComposing.current) {
-      const segments = readSegmentsFromDOM()
-      lastRenderedValue.current = segments
-      onChange(segments)
-      return
-    }
+      const nativeIsComposing = (e?.nativeEvent as InputEvent | undefined)?.isComposing ?? false
+      if (nativeIsComposing && !events.isComposing.current) {
+        events.markCompositionInput()
+      }
 
-    const editor = editorRef.current
-
-    // Capture cursor offset BEFORE normalizeEditorDOM strips <a> elements,
-    // otherwise the anchor node becomes detached and we lose the position.
-    const savedCursorOffset = editor ? getCursorOffset(editor) : null
-
-    if (editor) {
-      // Normalize browser-inserted block elements (div, p, font, a, etc.)
-      normalizeEditorDOM(editor)
-    }
-
-    const segments = readSegmentsFromDOM()
-
-    // Check for list auto-formatting (e.g., "- " -> "bullet ")
-    if (markdownEnabled && editor && savedCursorOffset !== null) {
-      const formatted = autoFormatListPrefix(segments, savedCursorOffset)
-      if (formatted) {
-        lastRenderedValue.current = formatted.segments
-        onChange(formatted.segments)
-        renderSegmentsToDOM(formatted.segments)
-        setCursorAtOffset(editor, formatted.cursorOffset)
-        runTriggerDetection()
+      // During IME composition, sync model but skip trigger detection
+      if (events.isComposing.current || nativeIsComposing) {
+        const segments = readSegmentsFromDOM()
+        lastRenderedValue.current = segments
+        onChange(segments)
         return
       }
-    }
 
-    // Debounced undo: capture the pre-edit state at the start of a typing
-    // session and push it to the undo stack after UNDO_DEBOUNCE_MS of idle.
-    if (!undoBaseState.current) {
-      undoBaseState.current = lastRenderedValue.current
-    }
+      const editor = editorRef.current
 
-    lastRenderedValue.current = segments
-    onChange(segments)
-    if (undoTimer.current) clearTimeout(undoTimer.current)
-    undoTimer.current = setTimeout(() => {
-      if (undoBaseState.current) {
-        events.pushUndo(undoBaseState.current)
-        undoBaseState.current = null
+      // Capture cursor offset BEFORE normalizeEditorDOM strips <a> elements,
+      // otherwise the anchor node becomes detached and we lose the position.
+      const savedCursorOffset = editor ? getCursorOffset(editor) : null
+
+      if (editor) {
+        // Normalize browser-inserted block elements (div, p, font, a, etc.)
+        normalizeEditorDOM(editor)
       }
-      undoTimer.current = null
-    }, UNDO_DEBOUNCE_MS)
 
-    // Decorate URLs and markdown formatting in text nodes
-    if (editor) {
-      decorateURLsInEditor(editor)
-      if (markdownEnabled) decorateMarkdownInEditor(editor)
-      if (savedCursorOffset !== null) {
-        setCursorAtOffset(editor, savedCursorOffset)
+      const segments = readSegmentsFromDOM()
+
+      // Check for list auto-formatting (e.g., "- " -> "bullet ")
+      if (markdownEnabled && editor && savedCursorOffset !== null) {
+        const formatted = autoFormatListPrefix(segments, savedCursorOffset)
+        if (formatted) {
+          lastRenderedValue.current = formatted.segments
+          onChange(formatted.segments)
+          renderSegmentsToDOM(formatted.segments)
+          setCursorAtOffset(editor, formatted.cursorOffset)
+          runTriggerDetection()
+          return
+        }
       }
-    }
 
-    runTriggerDetection()
-  }, [
-    onChange,
-    readSegmentsFromDOM,
-    runTriggerDetection,
-    renderSegmentsToDOM,
-    markdownEnabled,
-    events,
-  ])
+      // Debounced undo: capture the pre-edit state at the start of a typing
+      // session and push it to the undo stack after UNDO_DEBOUNCE_MS of idle.
+      if (!undoBaseState.current) {
+        undoBaseState.current = lastRenderedValue.current
+      }
+
+      lastRenderedValue.current = segments
+      onChange(segments)
+      if (undoTimer.current) clearTimeout(undoTimer.current)
+      undoTimer.current = setTimeout(() => {
+        if (undoBaseState.current) {
+          events.pushUndo(undoBaseState.current)
+          undoBaseState.current = null
+        }
+        undoTimer.current = null
+      }, UNDO_DEBOUNCE_MS)
+
+      // Decorate URLs and markdown formatting in text nodes
+      if (editor) {
+        decorateURLsInEditor(editor)
+        if (markdownEnabled) decorateMarkdownInEditor(editor)
+        if (savedCursorOffset !== null) {
+          setCursorAtOffset(editor, savedCursorOffset)
+        }
+      }
+
+      runTriggerDetection()
+    },
+    [
+      onChange,
+      readSegmentsFromDOM,
+      runTriggerDetection,
+      renderSegmentsToDOM,
+      markdownEnabled,
+      events,
+    ],
+  )
 
   // -----------------------------------------------------------------------
   // Chip click delegation
