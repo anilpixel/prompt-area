@@ -148,12 +148,15 @@ export function PromptArea({
     }, BLUR_DELAY_MS)
   }, [eventHandlers, autoGrow, editorRef])
 
-  const handleInputWithGrow = useCallback(() => {
-    handleInput()
-    if (autoGrow && isFocused) {
-      syncHeight()
-    }
-  }, [handleInput, autoGrow, isFocused, syncHeight])
+  const handleInputWithGrow = useCallback(
+    (event?: React.FormEvent<HTMLDivElement>) => {
+      handleInput(event)
+      if (autoGrow && isFocused) {
+        syncHeight()
+      }
+    },
+    [handleInput, autoGrow, isFocused, syncHeight],
+  )
 
   // Re-measure on value changes (chip insertion, undo/redo, programmatic updates)
   useEffect(() => {
@@ -283,7 +286,8 @@ export function PromptArea({
             <div
               className="h-full w-full"
               style={{
-                background: 'linear-gradient(to bottom, transparent, color-mix(in srgb, var(--prompt-area-surface, var(--background)) 80%, transparent), var(--prompt-area-surface, var(--background)))',
+                background:
+                  'linear-gradient(to bottom, transparent, color-mix(in srgb, var(--prompt-area-surface, var(--background)) 80%, transparent), var(--prompt-area-surface, var(--background)))',
               }}
             />
           </div>

@@ -19,6 +19,7 @@ type EventHandlerDeps = {
   editorRef: React.RefObject<HTMLDivElement | null>
   readSegmentsFromDOM: () => Segment[]
   onChange: (segments: Segment[]) => void
+  syncCompositionEndSegments: (segments: Segment[]) => void
   renderSegmentsToDOM: (segments: Segment[]) => void
   runTriggerDetection: () => void
   dismissTrigger: () => void
@@ -42,6 +43,7 @@ type PromptAreaEventHandlers = {
   handleKeyDownForUndoRedo: (e: React.KeyboardEvent<HTMLDivElement>) => boolean
   pushUndo: (segments: Segment[]) => void
   resetUndoHistory: () => void
+  markCompositionInput: () => void
   isComposing: React.RefObject<boolean>
 }
 
@@ -72,6 +74,7 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
     editorRef,
     readSegmentsFromDOM,
     onChange,
+    syncCompositionEndSegments,
     renderSegmentsToDOM,
     runTriggerDetection,
     dismissTrigger,
@@ -315,18 +318,30 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
   }, [])
 
   // -----------------------------------------------------------------------
-  // IME Composition: track state, defer trigger detection
+  // IME Composition: track state, sync final content, defer trigger detection
   // -----------------------------------------------------------------------
 
   const handleCompositionStart = useCallback(() => {
     isComposing.current = true
   }, [])
 
+  const markCompositionInput = useCallback(() => {
+    isComposing.current = true
+  }, [])
+
   const handleCompositionEnd = useCallback(() => {
-    isComposing.current = false
-    // Run trigger detection after composition ends
+    const segments = readSegmentsFromDOM()
+    syncCompositionEndSegments(segments)
+
+    // Chrome may emit a trailing input event after compositionend. Keep the
+    // composing guard true through the current microtask so that input does not
+    // run the normal DOM normalization branch while IME is still settling.
+    queueMicrotask(() => {
+      isComposing.current = false
+    })
+
     runTriggerDetection()
-  }, [runTriggerDetection])
+  }, [readSegmentsFromDOM, runTriggerDetection, syncCompositionEndSegments])
 
   // -----------------------------------------------------------------------
   // Blur: dismiss trigger dropdown with delay (so popover clicks work)
@@ -403,6 +418,7 @@ export function usePromptAreaEvents(deps: EventHandlerDeps): PromptAreaEventHand
     handleKeyDownForUndoRedo,
     pushUndo,
     resetUndoHistory,
+    markCompositionInput,
     isComposing,
   }
 }

@@ -18,6 +18,7 @@ function createDeps(overrides: Partial<Parameters<typeof usePromptAreaEvents>[0]
     editorRef,
     readSegmentsFromDOM: vi.fn((): Segment[] => []),
     onChange: vi.fn(),
+    syncCompositionEndSegments: vi.fn(),
     renderSegmentsToDOM: vi.fn(),
     runTriggerDetection: vi.fn(),
     dismissTrigger: vi.fn(),
@@ -30,6 +31,7 @@ function createDeps(overrides: Partial<Parameters<typeof usePromptAreaEvents>[0]
   return deps as typeof deps & {
     readSegmentsFromDOM: ReturnType<typeof vi.fn<() => Segment[]>>
     onChange: ReturnType<typeof vi.fn>
+    syncCompositionEndSegments: ReturnType<typeof vi.fn>
     renderSegmentsToDOM: ReturnType<typeof vi.fn>
     runTriggerDetection: ReturnType<typeof vi.fn>
     dismissTrigger: ReturnType<typeof vi.fn>
@@ -165,8 +167,10 @@ describe('usePromptAreaEvents', () => {
   })
 
   describe('handleCompositionEnd', () => {
-    it('sets isComposing to false and runs trigger detection', () => {
+    it('syncs final segments, defers composing reset, and runs trigger detection', async () => {
+      const finalSegments: Segment[] = [{ type: 'text', text: '你' }]
       const deps = createDeps()
+      deps.readSegmentsFromDOM.mockReturnValue(finalSegments)
       editorEl = deps._editor
       const { result } = renderHook(() => usePromptAreaEvents(deps))
 
@@ -175,11 +179,14 @@ describe('usePromptAreaEvents', () => {
       })
       expect(result.current.isComposing.current).toBe(true)
 
-      act(() => {
+      await act(async () => {
         result.current.handleCompositionEnd()
+        expect(result.current.isComposing.current).toBe(true)
+        await Promise.resolve()
       })
 
       expect(result.current.isComposing.current).toBe(false)
+      expect(deps.syncCompositionEndSegments).toHaveBeenCalledWith(finalSegments)
       expect(deps.runTriggerDetection).toHaveBeenCalled()
     })
   })

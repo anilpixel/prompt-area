@@ -1,9 +1,41 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createRef } from 'react'
+import { createRef, useState } from 'react'
 import { PromptArea } from '../prompt-area'
 import type { PromptAreaHandle, PromptAreaImage, PromptAreaFile, Segment } from '../types'
+
+function readPlainText(segments: Segment[]): string {
+  return segments
+    .map((segment) =>
+      segment.type === 'text' ? segment.text : `${segment.trigger}${segment.displayText}`,
+    )
+    .join('')
+}
+
+function ControlledPromptArea() {
+  const [value, setValue] = useState<Segment[]>([])
+
+  return (
+    <>
+      <PromptArea value={value} onChange={setValue} markdown={false} />
+      <output aria-label="Current input value">{readPlainText(value)}</output>
+    </>
+  )
+}
+
+function commitFirstChineseCharacter(editor: HTMLElement) {
+  editor.textContent = 'n'
+  fireEvent.input(editor, {
+    data: 'n',
+    inputType: 'insertCompositionText',
+    isComposing: true,
+  })
+
+  fireEvent.compositionStart(editor)
+  editor.textContent = '你'
+  fireEvent.compositionEnd(editor, { data: '你' })
+}
 
 describe('PromptArea', () => {
   const defaultProps = {
@@ -63,6 +95,38 @@ describe('PromptArea', () => {
   it('sets data-test-id', () => {
     render(<PromptArea {...defaultProps} data-test-id="prompt-input" />)
     expect(screen.getByRole('textbox')).toHaveAttribute('data-test-id', 'prompt-input')
+  })
+
+  it('syncs the first IME character on compositionend without a trailing input event', () => {
+    render(<ControlledPromptArea />)
+
+    const editor = screen.getByRole('textbox')
+    const currentValue = screen.getByRole('status', { name: 'Current input value' })
+
+    commitFirstChineseCharacter(editor)
+
+    expect(currentValue).toHaveTextContent('你')
+  })
+
+  it('uses the final IME character as the undo baseline for the next normal input', () => {
+    render(<ControlledPromptArea />)
+
+    const editor = screen.getByRole('textbox')
+    const currentValue = screen.getByRole('status', { name: 'Current input value' })
+
+    commitFirstChineseCharacter(editor)
+    expect(currentValue).toHaveTextContent('你')
+
+    editor.textContent = '你好'
+    fireEvent.input(editor, {
+      data: '好',
+      inputType: 'insertText',
+    })
+    expect(currentValue).toHaveTextContent('你好')
+
+    fireEvent.keyDown(editor, { key: 'z', metaKey: true })
+
+    expect(currentValue).toHaveTextContent('你')
   })
 
   describe('image support', () => {
